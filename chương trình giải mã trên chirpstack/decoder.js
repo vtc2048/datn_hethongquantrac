@@ -6,7 +6,7 @@ function decodeUplink(input) {
         return {
             "errors": ["Độ dài payload không hợp lệ, cần 25 byte"]
         };
-    }
+    } 
 
     var temperature = ((bytes[0] << 8) | bytes[1]) / 10.0;
     var humidity = ((bytes[2] << 8) | bytes[3]) / 10.0;
