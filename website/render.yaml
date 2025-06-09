@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: datn-web
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn --workers 1 --bind 0.0.0.0:5500 wsgi:app"
+    staticSites:
+      - root: /
+        routes:
+          - path: /*
