@@ -1,26 +1,25 @@
 let map, marker;
 let aqiCircles = [];
-let isFirstLoad = true; // Biến để theo dõi lần tải đầu tiên
-let lastValidData = null; // Biến lưu trữ dữ liệu hợp lệ cuối cùng (có tọa độ)
+let isFirstLoad = true; 
+let lastValidData = null; 
 
 function initMap() {
     if (map) map.remove();
     map = L.map('map', {
-        closePopupOnClick: false, // Không đóng popup khi nhấp ngoài
-        autoClose: false // Cho phép nhiều popup cùng tồn tại
+        closePopupOnClick: false, 
+        autoClose: false 
     }).setView([16.05, 108.2], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // Ngăn chặn đóng popup khi nhấp ngoài và điều chỉnh khi zoom
+    
     map.on('popupopen', function (e) {
         e.popup.options.autoClose = false;
         e.popup.options.closeOnClick = false;
         adjustPopupSize(e.popup);
     });
 
-    // Điều chỉnh popup khi zoom thay đổi
     map.on('zoomend', function () {
         aqiCircles.forEach(circle => {
             if (circle.isPopupOpen()) {
@@ -30,13 +29,13 @@ function initMap() {
     });
 }
 
-// Hàm điều chỉnh kích thước popup dựa trên mức zoom
+
 function adjustPopupSize(popup) {
     const zoom = map.getZoom();
-    let fontSize = 10; // Kích thước font mặc định
+    let fontSize = 10; 
     let padding = 1; // Padding mặc định
 
-    // Giảm kích thước font và padding khi zoom nhỏ
+ 
     if (zoom < 12) {
         fontSize = 7;
         padding = 1;
@@ -50,9 +49,8 @@ function adjustPopupSize(popup) {
     popup.update(); // Cập nhật popup để áp dụng thay đổi
 }
 
-// Hàm hiển thị modal chi tiết
 function showDetailModal(circle) {
-    const sensorData = circle.sensorData; // Lấy dữ liệu cảm biến từ vòng tròn
+    const sensorData = circle.sensorData; 
 
     let modal = document.getElementById('detailModal');
     if (!modal) {
@@ -80,7 +78,7 @@ function showDetailModal(circle) {
         </div>
     `;
 
-    modal.style.display = 'flex'; // Luôn hiển thị modal khi gọi hàm
+    modal.style.display = 'flex';
 
     // Xử lý đóng modal
     const closeBtn = modal.querySelector('.close-btn');
@@ -88,7 +86,6 @@ function showDetailModal(circle) {
         modal.style.display = 'none';
     };
 
-    // Đóng modal khi nhấp ra ngoài
     modal.onclick = (e) => {
         if (e.target === modal) {
             modal.style.display = 'none';
@@ -96,7 +93,7 @@ function showDetailModal(circle) {
     };
 }
 
-// ================== AQI LOGIC ===================
+// ================== AQI ===================
 
 const VN_AQI_BREAKPOINTS = {
     pm25: [ { Cp_lo: 0, Cp_hi: 30, I_lo: 0, I_hi: 50 }, { Cp_lo: 31, Cp_hi: 60, I_lo: 51, I_hi: 100 }, { Cp_lo: 61, Cp_hi: 90, I_lo: 101, I_hi: 150 }, { Cp_lo: 91, Cp_hi: 120, I_lo: 151, I_hi: 200 }, { Cp_lo: 121, Cp_hi: 250, I_lo: 201, I_hi: 300 }, { Cp_lo: 251, Cp_hi: 500, I_lo: 301, I_hi: 500 } ],
@@ -176,7 +173,7 @@ function fetchData() {
                     const itemDate = new Date(item.time);
                     return itemDate >= oneDayAgo && itemDate <= now;
                 })
-                .sort((a, b) => new Date(b.time) - new Date(a.time)); // Sắp xếp theo thời gian giảm dần
+                .sort((a, b) => new Date(b.time) - new Date(a.time)); 
 
             if (filteredData.length === 0) {
                 console.warn("Không có dữ liệu trong 30 ngày qua");
@@ -186,7 +183,7 @@ function fetchData() {
                 return;
             }
 
-            const latestItem = filteredData[0]; // Dữ liệu mới nhất
+            const latestItem = filteredData[0]; 
             const obj = latestItem.object;
             if (!obj) {
                 console.warn("Dữ liệu thiếu object");
@@ -226,12 +223,10 @@ function fetchData() {
                 }
             }
 
-            // Nếu có tọa độ hợp lệ, lưu dữ liệu này làm dữ liệu hợp lệ cuối cùng
             if (!gpsError && obj.latitude >= -90 && obj.latitude <= 90 && obj.longitude >= -180 && obj.longitude <= 180) {
                 lastValidData = filteredData;
             }
 
-            // Lưu trạng thái popup hiện tại (vị trí nào đang mở popup)
             const openPopups = new Map();
             aqiCircles.forEach(circle => {
                 if (circle.isPopupOpen()) {
@@ -240,11 +235,10 @@ function fetchData() {
                 }
             });
 
-            // Sử dụng dữ liệu hợp lệ (mới hoặc cũ) để vẽ bản đồ
             const dataToRender = gpsError && lastValidData ? lastValidData : filteredData;
             renderMapFromData(dataToRender, openPopups);
 
-            // Cập nhật thông số cảm biến và AQI (luôn sử dụng dữ liệu mới nhất)
+            // Cập nhật thông số cảm biến và AQI 
             const aqiData = calculateAQIFromSensors(obj); // Tính AQI cho dữ liệu mới nhất
             document.getElementById("temperature").textContent = obj.temperature.toFixed(1) + " °C";
             document.getElementById("humidity").textContent = obj.humidity.toFixed(1) + " %";
@@ -271,23 +265,22 @@ function fetchData() {
         });
 }
 
-// Hàm vẽ bản đồ từ dữ liệu (có thể là dữ liệu mới hoặc dữ liệu cũ)
+// Hàm vẽ bản đồ từ dữ liệu 
 function renderMapFromData(data, openPopups = new Map()) {
-    // Tạo danh sách các vị trí duy nhất (không trùng lặp)
+    // Tạo danh sách các vị trí duy nhất
     const uniqueLocations = [];
-    const distanceThreshold = 100; // Ngưỡng khoảng cách (mét) để xác định vị trí trùng
+    const distanceThreshold = 100; // Ngưỡng khoảng cách để xác định vị trí trùng
 
     data.forEach(item => {
         const obj = item.object;
         if (!obj || !obj.latitude || !obj.longitude) {
-            return; // Bỏ qua nếu dữ liệu không có tọa độ
+            return; 
         }
 
         const lat = obj.latitude;
         const lng = obj.longitude;
         const latlng = L.latLng(lat, lng);
 
-        // Kiểm tra xem vị trí này có gần với vị trí đã có không
         let isDuplicate = false;
         for (let i = 0; i < uniqueLocations.length; i++) {
             const existingItem = uniqueLocations[i];
@@ -375,25 +368,22 @@ function renderMapFromData(data, openPopups = new Map()) {
             newCircles.push(circle);
         }
 
-        // Gắn sự kiện cho nút "Chi tiết"
         const popup = circle.getPopup();
         popup.on('contentupdate', function () {
             const detailBtn = popup.getElement().querySelector('.detail-btn');
             if (detailBtn) {
                 detailBtn.onclick = (e) => {
-                    e.stopPropagation(); // Ngăn chặn sự kiện lan ra ngoài
+                    e.stopPropagation(); 
                     showDetailModal(circle);
                 };
             }
         });
 
-        // Mở lại popup nếu trước đó nó đang mở
         if (openPopups.has(latlngKey)) {
             circle.openPopup();
         }
     });
 
-    // Xóa các vòng tròn không còn trong dữ liệu
     aqiCircles.forEach(circle => {
         if (!newCircles.includes(circle)) {
             map.removeLayer(circle);
@@ -401,7 +391,7 @@ function renderMapFromData(data, openPopups = new Map()) {
     });
     aqiCircles = newCircles;
 
-    // Cập nhật marker cho dữ liệu mới nhất (nếu có tọa độ hợp lệ)
+    // Cập nhật marker cho dữ liệu mới nhất 
     const latestItem = data[0];
     const obj = latestItem.object;
     if (obj.latitude !== 0.0 || obj.longitude !== 0.0) {
@@ -416,7 +406,7 @@ function renderMapFromData(data, openPopups = new Map()) {
         // Chỉ setView trong lần tải đầu tiên
         if (isFirstLoad) {
             map.setView([obj.latitude, obj.longitude], 15);
-            isFirstLoad = false; // Đặt lại để không setView trong các lần sau
+            isFirstLoad = false; 
         }
     }
 }
