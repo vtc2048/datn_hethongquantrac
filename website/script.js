@@ -2,6 +2,7 @@ let map, marker;
 let aqiCircles = [];
 let isFirstLoad = true; 
 let lastValidData = null; 
+let sensorCharts = {}; 
 
 function initMap() {
     if (map) map.remove();
@@ -13,7 +14,6 @@ function initMap() {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    
     map.on('popupopen', function (e) {
         e.popup.options.autoClose = false;
         e.popup.options.closeOnClick = false;
@@ -29,13 +29,11 @@ function initMap() {
     });
 }
 
-
 function adjustPopupSize(popup) {
     const zoom = map.getZoom();
     let fontSize = 10; 
-    let padding = 1; // Padding mặc định
+    let padding = 1; // Padding 
 
- 
     if (zoom < 12) {
         fontSize = 7;
         padding = 1;
@@ -46,7 +44,7 @@ function adjustPopupSize(popup) {
 
     const content = popup.getContent();
     popup.setContent(`<div style="font-size: ${fontSize}px; padding: ${padding}px;">${content}</div>`);
-    popup.update(); // Cập nhật popup để áp dụng thay đổi
+    popup.update(); // update popup 
 }
 
 function showDetailModal(circle) {
@@ -78,14 +76,14 @@ function showDetailModal(circle) {
         </div>
     `;
 
-    modal.style.display = 'flex';
+    modal.style.display = 'flex'; 
 
-    // Xử lý đóng modal
     const closeBtn = modal.querySelector('.close-btn');
     closeBtn.onclick = () => {
         modal.style.display = 'none';
     };
 
+    // close modal 
     modal.onclick = (e) => {
         if (e.target === modal) {
             modal.style.display = 'none';
@@ -93,7 +91,6 @@ function showDetailModal(circle) {
     };
 }
 
-// ================== AQI ===================
 
 const VN_AQI_BREAKPOINTS = {
     pm25: [ { Cp_lo: 0, Cp_hi: 30, I_lo: 0, I_hi: 50 }, { Cp_lo: 31, Cp_hi: 60, I_lo: 51, I_hi: 100 }, { Cp_lo: 61, Cp_hi: 90, I_lo: 101, I_hi: 150 }, { Cp_lo: 91, Cp_hi: 120, I_lo: 151, I_hi: 200 }, { Cp_lo: 121, Cp_hi: 250, I_lo: 201, I_hi: 300 }, { Cp_lo: 251, Cp_hi: 500, I_lo: 301, I_hi: 500 } ],
@@ -121,7 +118,7 @@ function calculateAQIFromSensors(obj) {
         so2: calculateIndividualAQI(obj.so2, "so2"),
         no2: calculateIndividualAQI(obj.no2, "no2"),
     };
-    const maxAQI = Math.max(...Object.values(aqiValues).filter(v => v !== -1)); // Lọc giá trị -1 (không hợp lệ)
+    const maxAQI = Math.max(...Object.values(aqiValues).filter(v => v !== -1)); 
     return { aqi: maxAQI !== -Infinity ? maxAQI : 0, level: getAQILevel(maxAQI !== -Infinity ? maxAQI : 0) };
 }
 
@@ -146,7 +143,353 @@ function getAQIColor(level) {
     }
 }
 
-// ================= FETCH DATA =======================
+
+function aggregateSensorData(data) {
+    const now = new Date();
+    const oneDayAgo = new Date(now - 24 * 60 * 60 * 1000);
+    const timeSlots = Array(12).fill().map((_, i) => {
+        const slotTime = new Date(now);
+        slotTime.setHours(i * 2, 0, 0, 0); // 0h, 3h, 6h, 9h, 12h, 15h, 18h, 21h
+        if (slotTime > now) {
+            slotTime.setDate(slotTime.getDate() - 1);
+        }
+        return slotTime;
+    });
+
+    const aggregatedData = timeSlots.map(() => ({
+        aqi: [],
+        temperature: [],
+        humidity: [],
+        no2: [],
+        so2: [],
+        pm10: [],
+        pm25: [],
+        co: [],
+        uv: []
+    }));
+
+    const filteredData = data.filter(item => {
+        if (!item.time || !item.object) return false;
+        const itemDate = new Date(item.time);
+        return itemDate >= oneDayAgo && itemDate <= now;
+    });
+
+    if (filteredData.length === 0) {
+        return timeSlots.map(slot => ({
+            time: slot.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+            aqi: 0,
+            temperature: 0,
+            humidity: 0,
+            no2: 0,
+            so2: 0,
+            pm10: 0,
+            pm25: 0,
+            co: 0,
+            uv: 0
+        }));
+    }
+
+    filteredData.forEach(item => {
+        const obj = item.object;
+        const itemDate = new Date(item.time);
+        const hour = itemDate.getHours();
+        const slotIndex = Math.floor(hour / 2);
+        if (slotIndex < 12) {
+            const slotData = aggregatedData[slotIndex];
+            const aqiData = calculateAQIFromSensors(obj);
+            slotData.aqi.push(aqiData.aqi);
+            slotData.temperature.push(obj.temperature);
+            slotData.humidity.push(obj.humidity);
+            slotData.no2.push(obj.no2);
+            slotData.so2.push(obj.so2);
+            slotData.pm10.push(obj.pm10);
+            slotData.pm25.push(obj.pm25);
+            slotData.co.push(obj.co);
+            slotData.uv.push(obj.uv);
+        }
+    });
+
+    return aggregatedData.map((slot, index) => {
+        const avg = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+        return {
+            time: timeSlots[index].toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+            aqi: avg(slot.aqi).toFixed(1),
+            temperature: avg(slot.temperature).toFixed(1),
+            humidity: avg(slot.humidity).toFixed(1),
+            no2: avg(slot.no2).toFixed(1),
+            so2: avg(slot.so2).toFixed(1),
+            pm10: avg(slot.pm10).toFixed(1),
+            pm25: avg(slot.pm25).toFixed(1),
+            co: avg(slot.co).toFixed(1),
+            uv: avg(slot.uv).toFixed(1)
+        };
+    });
+}
+
+function renderSensorChart(data) {
+    const ctxAQI = document.getElementById('chartAQI')?.getContext('2d');
+    const ctxTemperature = document.getElementById('chartTemperature')?.getContext('2d');
+    const ctxHumidity = document.getElementById('chartHumidity')?.getContext('2d');
+    const ctxNO2 = document.getElementById('chartNO2')?.getContext('2d');
+    const ctxSO2 = document.getElementById('chartSO2')?.getContext('2d');
+    const ctxPM10 = document.getElementById('chartPM10')?.getContext('2d');
+    const ctxPM25 = document.getElementById('chartPM25')?.getContext('2d');
+    const ctxCO = document.getElementById('chartCO')?.getContext('2d');
+    const ctxUV = document.getElementById('chartUV')?.getContext('2d');
+
+    const aggregatedData = aggregateSensorData(data);
+    console.log("Dữ liệu tổng hợp cho biểu đồ:", aggregatedData);
+
+    const allZero = aggregatedData.every(d => 
+        d.aqi === 0 && d.temperature === 0 && d.humidity === 0 && d.no2 === 0 && 
+        d.so2 === 0 && d.pm10 === 0 && d.pm25 === 0 && d.co === 0 && d.uv === 0
+    );
+
+    Object.values(sensorCharts).forEach(chart => chart?.destroy());
+
+    // Render từng biểu đồ
+    if (ctxAQI) {
+        sensorCharts['AQI'] = new Chart(ctxAQI, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'AQI (µg/m³)',
+                    data: aggregatedData.map(d => d.aqi),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (ctxTemperature) {
+        sensorCharts['Temperature'] = new Chart(ctxTemperature, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'Nhiệt độ (°C)',
+                    data: aggregatedData.map(d => d.temperature),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (ctxHumidity) {
+        sensorCharts['Humidity'] = new Chart(ctxHumidity, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'Độ ẩm (%)',
+                    data: aggregatedData.map(d => d.humidity),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (ctxNO2) {
+        sensorCharts['NO2'] = new Chart(ctxNO2, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'NO2 (µg/m³)',
+                    data: aggregatedData.map(d => d.no2),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (ctxSO2) {
+        sensorCharts['SO2'] = new Chart(ctxSO2, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'SO2 (µg/m³)',
+                    data: aggregatedData.map(d => d.so2),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (ctxPM10) {
+        sensorCharts['PM10'] = new Chart(ctxPM10, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'PM10 (µg/m³)',
+                    data: aggregatedData.map(d => d.pm10),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (ctxPM25) {
+        sensorCharts['PM25'] = new Chart(ctxPM25, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'PM2.5 (µg/m³)',
+                    data: aggregatedData.map(d => d.pm25),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (ctxCO) {
+        sensorCharts['CO'] = new Chart(ctxCO, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'CO (µg/m³)',
+                    data: aggregatedData.map(d => d.co),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (ctxUV) {
+        sensorCharts['UV'] = new Chart(ctxUV, {
+            type: 'line',
+            data: {
+                labels: aggregatedData.map(d => d.time),
+                datasets: [{
+                    label: 'UV (mW/cm²)',
+                    data: aggregatedData.map(d => d.uv),
+                    borderColor: '#36a2eb',
+                    fill: false,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: { beginAtZero: true, title: { display: true, text: 'Giá trị' } },
+                    x: { title: { display: true, text: 'Thời gian' } }
+                },
+                plugins: { legend: { position: 'top' }, tooltip: { mode: 'index', intersect: false } },
+                hover: { mode: 'nearest', intersect: true }
+            }
+        });
+    }
+
+    if (allZero) {
+        Object.keys(sensorCharts).forEach(key => {
+            const ctx = document.getElementById(`chart${key}`).getContext('2d');
+            ctx.canvas.parentNode.innerHTML = '<p style="text-align: center; color: #2c3e50;">Hệ thống tắt, không có dữ liệu. Giá trị mặc định là 0.</p>';
+        });
+    }
+}
+
 
 function fetchData() {
     fetch('/api/data')
@@ -155,16 +498,15 @@ function fetchData() {
             return res.json();
         })
         .then(data => {
+            console.log("Dữ liệu thô từ API:", data);
             if (!data || !Array.isArray(data) || data.length === 0) {
                 console.error("Không có dữ liệu hoặc dữ liệu không hợp lệ");
-                // Sử dụng dữ liệu cũ nếu có
                 if (lastValidData) {
                     renderMapFromData(lastValidData);
                 }
                 return;
             }
 
-            // Lọc dữ liệu trong 30 ngày gần nhất
             const now = new Date();
             const oneDayAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
             const filteredData = data
@@ -173,7 +515,8 @@ function fetchData() {
                     const itemDate = new Date(item.time);
                     return itemDate >= oneDayAgo && itemDate <= now;
                 })
-                .sort((a, b) => new Date(b.time) - new Date(a.time)); 
+                .sort((a, b) => new Date(b.time) - new Date(a.time));
+            console.log("Dữ liệu đã lọc:", filteredData);
 
             if (filteredData.length === 0) {
                 console.warn("Không có dữ liệu trong 30 ngày qua");
@@ -183,7 +526,7 @@ function fetchData() {
                 return;
             }
 
-            const latestItem = filteredData[0]; 
+            const latestItem = filteredData[0];
             const obj = latestItem.object;
             if (!obj) {
                 console.warn("Dữ liệu thiếu object");
@@ -193,12 +536,9 @@ function fetchData() {
                 return;
             }
 
-            // Kiểm tra tọa độ (xác định lỗi GPS khi cả latitude và longitude đều là 0.0)
             let gpsError = (obj.latitude === 0.0 && obj.longitude === 0.0);
             if (gpsError) {
-                console.warn("Dữ liệu GPS lỗi (0.0, 0.0), sử dụng dữ liệu cũ trên bản đồ");
-
-                // Hiển thị thông báo
+                console.warn("Dữ liệu GPS lỗi (0.0, 0.0), b");
                 let warningDiv = document.getElementById('gps-warning');
                 if (!warningDiv) {
                     warningDiv = document.createElement('div');
@@ -216,7 +556,6 @@ function fetchData() {
                     document.getElementById('map').parentElement.appendChild(warningDiv);
                 }
             } else {
-                // Xóa thông báo nếu có tọa độ hợp lệ
                 const warningDiv = document.getElementById('gps-warning');
                 if (warningDiv) {
                     warningDiv.remove();
@@ -238,8 +577,7 @@ function fetchData() {
             const dataToRender = gpsError && lastValidData ? lastValidData : filteredData;
             renderMapFromData(dataToRender, openPopups);
 
-            // Cập nhật thông số cảm biến và AQI 
-            const aqiData = calculateAQIFromSensors(obj); // Tính AQI cho dữ liệu mới nhất
+            const aqiData = calculateAQIFromSensors(obj);
             document.getElementById("temperature").textContent = obj.temperature.toFixed(1) + " °C";
             document.getElementById("humidity").textContent = obj.humidity.toFixed(1) + " %";
             document.getElementById("no2").textContent = obj.no2 + " µg/m³";
@@ -248,28 +586,30 @@ function fetchData() {
             document.getElementById("pm25").textContent = obj.pm25 + " µg/m³";
             document.getElementById("co").textContent = obj.co + " µg/m³";
             document.getElementById("uv").textContent = obj.uv + " mW/cm³";
-            document.getElementById("aqi").textContent = aqiData.aqi; // Cập nhật AQI
+            document.getElementById("aqi").textContent = aqiData.aqi;
 
             const aqiIndicator = document.getElementById("aqiIndicator");
             const barWidth = document.querySelector(".aqi-bar").offsetWidth;
             const position = (aqiData.aqi / 500) * barWidth;
             aqiIndicator.style.left = `${position}px`;
             aqiIndicator.dataset.level = aqiData.level;
+
+            if (document.getElementById('Chart').style.display === 'block') {
+                console.log("Dữ liệu cho biểu đồ:", filteredData);
+                renderSensorChart(filteredData);
+            }
         })
         .catch(err => {
             console.error("Lỗi lấy dữ liệu:", err);
-            // Sử dụng dữ liệu cũ nếu có
             if (lastValidData) {
                 renderMapFromData(lastValidData);
             }
         });
 }
 
-// Hàm vẽ bản đồ từ dữ liệu 
 function renderMapFromData(data, openPopups = new Map()) {
-    // Tạo danh sách các vị trí duy nhất
     const uniqueLocations = [];
-    const distanceThreshold = 100; // Ngưỡng khoảng cách để xác định vị trí trùng
+    const distanceThreshold = 100; 
 
     data.forEach(item => {
         const obj = item.object;
@@ -289,7 +629,6 @@ function renderMapFromData(data, openPopups = new Map()) {
 
             if (distance < distanceThreshold) {
                 isDuplicate = true;
-                // Giữ bản ghi mới nhất
                 if (new Date(item.time) > new Date(existingItem.time)) {
                     uniqueLocations[i] = item;
                 }
@@ -302,14 +641,12 @@ function renderMapFromData(data, openPopups = new Map()) {
         }
     });
 
-    // Lưu trữ các vòng tròn hiện tại
     const existingCircles = new Map();
     aqiCircles.forEach(circle => {
         const latlng = circle.getLatLng();
         existingCircles.set(latlng.toString(), circle);
     });
 
-    // Cập nhật hoặc vẽ lại các vòng tròn
     const newCircles = [];
     uniqueLocations.forEach(item => {
         const obj = item.object;
@@ -320,7 +657,6 @@ function renderMapFromData(data, openPopups = new Map()) {
         const aqiColor = getAQIColor(aqiData.level);
         const latlngKey = latlng.toString();
 
-        // Lưu trữ dữ liệu cảm biến cho vòng tròn
         const sensorData = {
             aqi: aqiData.aqi,
             temperature: obj.temperature,
@@ -335,7 +671,6 @@ function renderMapFromData(data, openPopups = new Map()) {
 
         let circle = existingCircles.get(latlngKey);
         if (circle) {
-            // Cập nhật vòng tròn hiện có
             circle.setStyle({ fillColor: aqiColor });
             const popupContent = `
                 <div>
@@ -344,7 +679,7 @@ function renderMapFromData(data, openPopups = new Map()) {
                 </div>
             `;
             circle.getPopup().setContent(popupContent);
-            circle.sensorData = sensorData; // Cập nhật dữ liệu cảm biến
+            circle.sensorData = sensorData;
             newCircles.push(circle);
         } else {
             // Tạo vòng tròn mới
@@ -364,7 +699,7 @@ function renderMapFromData(data, openPopups = new Map()) {
             circle.on('click', function (e) {
                 this.openPopup();
             });
-            circle.sensorData = sensorData; // Lưu trữ dữ liệu cảm biến
+            circle.sensorData = sensorData;
             newCircles.push(circle);
         }
 
@@ -373,7 +708,7 @@ function renderMapFromData(data, openPopups = new Map()) {
             const detailBtn = popup.getElement().querySelector('.detail-btn');
             if (detailBtn) {
                 detailBtn.onclick = (e) => {
-                    e.stopPropagation(); 
+                    e.stopPropagation();
                     showDetailModal(circle);
                 };
             }
@@ -391,7 +726,6 @@ function renderMapFromData(data, openPopups = new Map()) {
     });
     aqiCircles = newCircles;
 
-    // Cập nhật marker cho dữ liệu mới nhất 
     const latestItem = data[0];
     const obj = latestItem.object;
     if (obj.latitude !== 0.0 || obj.longitude !== 0.0) {
@@ -403,15 +737,13 @@ function renderMapFromData(data, openPopups = new Map()) {
             marker.openPopup();
         }
 
-        // Chỉ setView trong lần tải đầu tiên
         if (isFirstLoad) {
             map.setView([obj.latitude, obj.longitude], 15);
-            isFirstLoad = false; 
+            isFirstLoad = false;
         }
     }
 }
 
-// ================ UI ================
 
 function zoomToDistrict(coords) {
     if (map) map.setView(coords, 14);
@@ -437,6 +769,8 @@ function openTab(evt, tabName) {
         } else {
             map.invalidateSize();
         }
+        fetchData();
+    } else if (tabName === 'Chart') {
         fetchData();
     }
 }
